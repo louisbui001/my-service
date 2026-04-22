@@ -1,19 +1,20 @@
 {
   "application": "my-service",
   "name": "🚨 Emergency Rollback",
-  "description": "Rollback khẩn cấp bất kỳ namespace. Chạy thủ công khi có incident.",
+  "description": "Rollback khẩn cấp bất kỳ namespace (dev, staging, production). Chạy thủ công khi có incident.",
   "keepWaitingPipelines": false,
   "limitConcurrent": false,
   "parameterConfig": [
     {
       "name": "environment",
       "label": "Namespace cần rollback",
-      "description": "dev hoặc staging",
+      "description": "dev, staging hoặc production",
       "default": "dev",
       "required": true,
       "options": [
         { "value": "dev" },
-        { "value": "staging" }
+        { "value": "staging" },
+        { "value": "production" }
       ]
     },
     {
@@ -37,7 +38,7 @@
       "customHeaders": {
         "Content-Type": "application/json"
       },
-      "payload": "{\"text\":\"⚠️ *EMERGENCY ROLLBACK TRIGGERED*\\n*Service:* ${parameters['deploymentName']}\\n*Environment:* ${parameters['environment']}\\n*By:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date()}\\nĐang rollback về version trước...\"}"
+      "payload": "{\"text\":\"⚠️ *EMERGENCY ROLLBACK TRIGGERED*\\n*Service:* ${parameters['deploymentName']}\\n*Environment:* ${parameters['environment']}\\n*By:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date().toString()}\\nĐang rollback về version trước...\"}"
     },
     {
       "refId": "2",
