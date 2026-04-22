@@ -1,7 +1,7 @@
 {
   "application": "my-service",
-  "name": "CI/CD — DEV → Staging",
-  "description": "Pipeline hoàn chỉnh: auto deploy DEV → smoke test → approval gate → deploy Staging → regression test.",
+  "name": "CI/CD — DEV → Staging → Production (Canary + Blue-Green)",
+  "description": "Full pipeline: auto deploy DEV → approval → Staging RollingUpdate → approval → Production Canary validation → Blue-Green full deploy.",
   "keepWaitingPipelines": false,
   "limitConcurrent": true,
   "parameterConfig": [],
@@ -25,7 +25,9 @@
       "name": "Deploy to DEV",
       "account": "my-k8s-account",
       "cloudProvider": "kubernetes",
-      "moniker": { "app": "my-service" },
+      "moniker": {
+        "app": "my-service"
+      },
       "skipExpressionEvaluation": false,
       "source": "text",
       "namespaceOverride": "dev",
@@ -159,23 +161,28 @@
     },
     {
       "refId": "2",
-      "requisiteStageRefIds": ["1"],
+      "requisiteStageRefIds": [
+        "1"
+      ],
       "type": "wait",
       "name": "Smoke Test — DEV (readinessProbe passed ✅)",
       "waitTime": 10,
       "comments": "deployManifest đã verify health qua readinessProbe. Pod chỉ Ready khi /actuator/health trả về 200."
     },
-
     {
       "refId": "2b",
-      "requisiteStageRefIds": ["2"],
+      "requisiteStageRefIds": [
+        "2"
+      ],
       "type": "wait",
       "name": "Wait — DEV Stability",
       "waitTime": 15
     },
     {
       "refId": "3",
-      "requisiteStageRefIds": ["2b"],
+      "requisiteStageRefIds": [
+        "2b"
+      ],
       "type": "webhook",
       "name": "Notify — DEV Deployed",
       "method": "POST",
@@ -228,7 +235,9 @@
       "name": "Deploy to Staging",
       "account": "my-k8s-account",
       "cloudProvider": "kubernetes",
-      "moniker": { "app": "my-service" },
+      "moniker": {
+        "app": "my-service"
+      },
       "skipExpressionEvaluation": false,
       "source": "text",
       "namespaceOverride": "staging",
@@ -373,31 +382,37 @@
     },
     {
       "refId": "7",
-      "requisiteStageRefIds": ["6"],
+      "requisiteStageRefIds": [
+        "6"
+      ],
       "type": "wait",
       "name": "Regression Test — Staging (readinessProbe passed ✅)",
       "waitTime": 10,
       "comments": "deployManifest đã verify health qua readinessProbe. Pod chỉ Ready khi /actuator/health trả về 200."
     },
-
     {
       "refId": "7b",
-      "requisiteStageRefIds": ["7"],
+      "requisiteStageRefIds": [
+        "7"
+      ],
       "type": "wait",
       "name": "Wait — Staging Stability",
       "waitTime": 20
     },
-
     {
       "refId": "7c",
-      "requisiteStageRefIds": ["7b"],
+      "requisiteStageRefIds": [
+        "7b"
+      ],
       "type": "wait",
       "name": "Wait — Staging Final Check",
       "waitTime": 10
     },
     {
       "refId": "8",
-      "requisiteStageRefIds": ["7c"],
+      "requisiteStageRefIds": [
+        "7c"
+      ],
       "type": "webhook",
       "name": "Notify — Staging Deployed",
       "method": "POST",
@@ -406,6 +421,437 @@
         "Content-Type": "application/json"
       },
       "payload": "{\"text\":\"🚀 *STAGING DEPLOY THÀNH CÔNG*\\n*Service:* my-service\\n*Version:* `${trigger['tag']}`\\n*Namespace:* staging\\n*Approved by:* ${execution['authentication']['user']}\\n*Regression tests:* ✅ Passed\\nService sẵn sàng cho QA/business testing.\"}"
+    },
+    {
+      "refId": "9",
+      "requisiteStageRefIds": [
+        "8"
+      ],
+      "type": "manualJudgment",
+      "name": "Approval — Promote to Production",
+      "instructions": "📋 TECH LEAD APPROVAL — PROMOTE TO PRODUCTION\n\nService: my-service\nVersion: ${trigger['tag']}\n\nChecklist:\n☐ Staging regression tests passed (Stage 7 xanh)\n☐ QA sign-off trên Staging\n☐ Không có blocker/critical bug\n☐ Change request đã được tạo\n\n⚠️  Pipeline sẽ deploy Canary (~25% traffic) trước, sau đó chờ xác nhận lần nữa trước khi full production.\n\nApprove → bắt đầu Canary.\nReject → pipeline dừng, production giữ nguyên.",
+      "judgmentInputs": [
+        {
+          "value": "Approve — Start Canary Deploy"
+        },
+        {
+          "value": "Reject — Cancel"
+        }
+      ],
+      "failPipeline": true,
+      "propagateAuthenticationContext": true,
+      "sendNotifications": true,
+      "notifications": [
+        {
+          "type": "slack",
+          "address": "tech-leads",
+          "when": [
+            "manualJudgment"
+          ],
+          "message": {
+            "manualJudgment": {
+              "text": "⏸ *APPROVAL NEEDED — my-service → PRODUCTION*\nVersion: `${trigger['tag']}`\nStaging regression ✅ — Approve to start Canary in Spinnaker UI."
+            }
+          }
+        }
+      ]
+    },
+    {
+      "refId": "10",
+      "requisiteStageRefIds": [
+        "9"
+      ],
+      "type": "deployManifest",
+      "name": "🐦 Deploy Canary — Production (~25% traffic)",
+      "account": "my-k8s-account",
+      "cloudProvider": "kubernetes",
+      "moniker": {
+        "app": "my-service"
+      },
+      "skipExpressionEvaluation": false,
+      "source": "text",
+      "namespaceOverride": "production",
+      "manifests": [
+        {
+          "apiVersion": "apps/v1",
+          "kind": "Deployment",
+          "metadata": {
+            "name": "my-service-canary",
+            "namespace": "production",
+            "labels": {
+              "app": "my-service",
+              "slot": "canary",
+              "env": "production"
+            },
+            "annotations": {
+              "deployed-version": "${trigger['tag']}",
+              "deployed-at": "${new java.util.Date().toString()}",
+              "deploy-type": "canary"
+            }
+          },
+          "spec": {
+            "replicas": 1,
+            "selector": {
+              "matchLabels": {
+                "app": "my-service",
+                "slot": "canary"
+              }
+            },
+            "strategy": {
+              "type": "Recreate"
+            },
+            "template": {
+              "metadata": {
+                "labels": {
+                  "app": "my-service",
+                  "slot": "canary",
+                  "version": "${trigger['tag']}"
+                }
+              },
+              "spec": {
+                "imagePullSecrets": [
+                  {
+                    "name": "registry-credentials"
+                  }
+                ],
+                "containers": [
+                  {
+                    "name": "my-service",
+                    "image": "louisbui/dev:${trigger['tag']}",
+                    "ports": [
+                      {
+                        "containerPort": 8080
+                      }
+                    ],
+                    "env": [
+                      {
+                        "name": "APP_ENV",
+                        "value": "production"
+                      },
+                      {
+                        "name": "APP_VERSION",
+                        "value": "${trigger['tag']}"
+                      },
+                      {
+                        "name": "CANARY",
+                        "value": "true"
+                      }
+                    ],
+                    "envFrom": [
+                      {
+                        "configMapRef": {
+                          "name": "my-service-config-production"
+                        }
+                      }
+                    ],
+                    "resources": {
+                      "requests": {
+                        "cpu": "200m",
+                        "memory": "512Mi"
+                      },
+                      "limits": {
+                        "cpu": "1000m",
+                        "memory": "1Gi"
+                      }
+                    },
+                    "readinessProbe": {
+                      "httpGet": {
+                        "path": "/actuator/health",
+                        "port": 8080
+                      },
+                      "initialDelaySeconds": 15,
+                      "periodSeconds": 10,
+                      "failureThreshold": 3
+                    },
+                    "livenessProbe": {
+                      "httpGet": {
+                        "path": "/actuator/health",
+                        "port": 8080
+                      },
+                      "initialDelaySeconds": 30,
+                      "periodSeconds": 20
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "apiVersion": "v1",
+          "kind": "Service",
+          "metadata": {
+            "name": "my-service",
+            "namespace": "production",
+            "labels": {
+              "app": "my-service"
+            }
+          },
+          "spec": {
+            "selector": {
+              "app": "my-service"
+            },
+            "ports": [
+              {
+                "name": "http",
+                "port": 80,
+                "targetPort": 8080
+              }
+            ],
+            "type": "ClusterIP"
+          }
+        }
+      ]
+    },
+    {
+      "refId": "11",
+      "requisiteStageRefIds": [
+        "10"
+      ],
+      "type": "wait",
+      "name": "⏱ Canary Monitoring — 2 min (theo dõi metrics)",
+      "waitTime": 120,
+      "comments": "Trong 2 phút này: kiểm tra logs, metrics, error rate của canary pod.\nkubectl logs -l slot=canary -n production --tail=100\nkubectl top pod -l slot=canary -n production"
+    },
+    {
+      "refId": "12",
+      "requisiteStageRefIds": [
+        "11"
+      ],
+      "type": "manualJudgment",
+      "name": "Canary Analysis — Promote or Rollback",
+      "instructions": "🔍 CANARY ANALYSIS\n\nService: my-service\nCanary Version: ${trigger['tag']}\nCanary đã chạy 2 phút trên Production (~25% traffic)\n\nKiểm tra:\n  kubectl logs -l slot=canary -n production --tail=50\n  kubectl top pod -l slot=canary -n production\n  kubectl describe pod -l slot=canary -n production\n\n✅ PROMOTE nếu:\n  - Không có error/exception bất thường\n  - Response time bình thường\n  - readinessProbe pass\n\n❌ ROLLBACK nếu:\n  - Có lỗi 5xx tăng đột biến\n  - Crash loop / OOMKilled\n  - Metrics bất thường",
+      "judgmentInputs": [
+        {
+          "value": "Promote — Blue/Green Full Deploy"
+        },
+        {
+          "value": "Rollback — Remove Canary"
+        }
+      ],
+      "failPipeline": false,
+      "propagateAuthenticationContext": true,
+      "sendNotifications": true,
+      "notifications": [
+        {
+          "type": "slack",
+          "address": "tech-leads",
+          "when": [
+            "manualJudgment"
+          ],
+          "message": {
+            "manualJudgment": {
+              "text": "🐦 *CANARY ANALYSIS — my-service Production*\nVersion: `${trigger['tag']}`\nCanary chạy 2 phút. Promote → Blue-Green full deploy | Rollback → remove canary."
+            }
+          }
+        }
+      ]
+    },
+    {
+      "refId": "12r",
+      "requisiteStageRefIds": [
+        "12"
+      ],
+      "type": "deleteManifest",
+      "name": "🔴 Rollback — Delete Canary",
+      "account": "my-k8s-account",
+      "cloudProvider": "kubernetes",
+      "location": "production",
+      "manifestName": "deployment my-service-canary",
+      "options": {
+        "gracePeriodSeconds": 30,
+        "cascading": true
+      },
+      "stageEnabled": {
+        "type": "expression",
+        "expression": "${ #stage('Canary Analysis — Promote or Rollback')['context']['judgmentInput'].equals('Rollback — Remove Canary') }"
+      }
+    },
+    {
+      "refId": "12n",
+      "requisiteStageRefIds": [
+        "12r"
+      ],
+      "type": "webhook",
+      "name": "Notify — Canary Rolled Back",
+      "method": "POST",
+      "url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+      "customHeaders": {
+        "Content-Type": "application/json"
+      },
+      "payload": "{\"text\":\"🔴 *CANARY ROLLED BACK — my-service Production*\\n*Version:* `${trigger['tag']}` không được promote\\n*Reason:* Canary analysis failed — rolled back by ${execution['authentication']['user']}\\n*Production:* Ổn định, version cũ vẫn chạy.\"}",
+      "stageEnabled": {
+        "type": "expression",
+        "expression": "${ #stage('Canary Analysis — Promote or Rollback')['context']['judgmentInput'].equals('Rollback — Remove Canary') }"
+      }
+    },
+    {
+      "refId": "13",
+      "requisiteStageRefIds": [
+        "12"
+      ],
+      "type": "deployManifest",
+      "name": "��🟢 Blue-Green Deploy — Production Full (3 replicas)",
+      "account": "my-k8s-account",
+      "cloudProvider": "kubernetes",
+      "moniker": {
+        "app": "my-service"
+      },
+      "skipExpressionEvaluation": false,
+      "source": "text",
+      "namespaceOverride": "production",
+      "rollbackOnFailure": true,
+      "stageEnabled": {
+        "type": "expression",
+        "expression": "${ #stage('Canary Analysis — Promote or Rollback')['context']['judgmentInput'].equals('Promote — Blue/Green Full Deploy') }"
+      },
+      "manifests": [
+        {
+          "apiVersion": "apps/v1",
+          "kind": "Deployment",
+          "metadata": {
+            "name": "my-service",
+            "namespace": "production",
+            "labels": {
+              "app": "my-service",
+              "slot": "stable",
+              "env": "production"
+            },
+            "annotations": {
+              "deployed-version": "${trigger['tag']}",
+              "deployed-at": "${new java.util.Date().toString()}",
+              "approved-by": "${execution['authentication']['user']}",
+              "kubernetes.io/change-cause": "Blue-Green deploy ${trigger['tag']} approved by ${execution['authentication']['user']}"
+            }
+          },
+          "spec": {
+            "replicas": 3,
+            "selector": {
+              "matchLabels": {
+                "app": "my-service",
+                "slot": "stable"
+              }
+            },
+            "strategy": {
+              "type": "RollingUpdate",
+              "rollingUpdate": {
+                "maxSurge": 3,
+                "maxUnavailable": 0
+              }
+            },
+            "template": {
+              "metadata": {
+                "labels": {
+                  "app": "my-service",
+                  "slot": "stable",
+                  "version": "${trigger['tag']}"
+                }
+              },
+              "spec": {
+                "imagePullSecrets": [
+                  {
+                    "name": "registry-credentials"
+                  }
+                ],
+                "containers": [
+                  {
+                    "name": "my-service",
+                    "image": "louisbui/dev:${trigger['tag']}",
+                    "ports": [
+                      {
+                        "containerPort": 8080
+                      }
+                    ],
+                    "env": [
+                      {
+                        "name": "APP_ENV",
+                        "value": "production"
+                      },
+                      {
+                        "name": "APP_VERSION",
+                        "value": "${trigger['tag']}"
+                      }
+                    ],
+                    "envFrom": [
+                      {
+                        "configMapRef": {
+                          "name": "my-service-config-production"
+                        }
+                      }
+                    ],
+                    "resources": {
+                      "requests": {
+                        "cpu": "500m",
+                        "memory": "512Mi"
+                      },
+                      "limits": {
+                        "cpu": "2000m",
+                        "memory": "2Gi"
+                      }
+                    },
+                    "readinessProbe": {
+                      "httpGet": {
+                        "path": "/actuator/health",
+                        "port": 8080
+                      },
+                      "initialDelaySeconds": 15,
+                      "periodSeconds": 10,
+                      "failureThreshold": 3
+                    },
+                    "livenessProbe": {
+                      "httpGet": {
+                        "path": "/actuator/health",
+                        "port": 8080
+                      },
+                      "initialDelaySeconds": 30,
+                      "periodSeconds": 20
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "refId": "14",
+      "requisiteStageRefIds": [
+        "13"
+      ],
+      "type": "wait",
+      "name": "Wait — Production Stability (60s)",
+      "waitTime": 60
+    },
+    {
+      "refId": "15",
+      "requisiteStageRefIds": [
+        "14"
+      ],
+      "type": "deleteManifest",
+      "name": "Cleanup — Delete Canary Pod",
+      "account": "my-k8s-account",
+      "cloudProvider": "kubernetes",
+      "location": "production",
+      "manifestName": "deployment my-service-canary",
+      "options": {
+        "gracePeriodSeconds": 10,
+        "cascading": true
+      }
+    },
+    {
+      "refId": "16",
+      "requisiteStageRefIds": [
+        "15"
+      ],
+      "type": "webhook",
+      "name": "Notify — Production Deployed 🚀",
+      "method": "POST",
+      "url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+      "customHeaders": {
+        "Content-Type": "application/json"
+      },
+      "payload": "{\"text\":\"🚀 *PRODUCTION DEPLOY THÀNH CÔNG — Blue-Green*\\n*Service:* my-service\\n*Version:* `${trigger['tag']}`\\n*Namespace:* production (3 replicas)\\n*Canary:* ✅ Validated → Promoted\\n*Approved by:* ${execution['authentication']['user']}\\n*Strategy:* Blue-Green (maxSurge:3, maxUnavailable:0)\\nProduction hoàn toàn ổn định.\"}"
     }
   ]
 }
