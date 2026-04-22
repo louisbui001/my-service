@@ -1,7 +1,7 @@
 {
   "application": "my-service",
   "name": "🚨 Emergency Rollback",
-  "description": "Rollback khẩn cấp về version cụ thể. Chạy thủ công khi có incident. Điền currentVersion và targetVersion trước khi trigger.",
+  "description": "Rollback khẩn cấp về version cụ thể. Pipeline tạm dừng để operator xem lịch sử và chọn version target.",
   "keepWaitingPipelines": false,
   "limitConcurrent": false,
   "parameterConfig": [
@@ -28,37 +28,40 @@
     {
       "name": "currentVersion",
       "label": "Version hiện tại (đang lỗi)",
-      "description": "Version tag đang chạy và gây lỗi. VD: v1.0.2-abc1234. Dùng: kubectl get deploy my-service -n <ns> -o jsonpath='{.spec.template.spec.containers[0].image}'",
+      "description": "Version tag đang chạy và gây lỗi. VD: v1.0.2-abc1234",
       "default": "",
       "required": true,
       "options": []
-    },
-    {
-      "name": "targetVersion",
-      "label": "Version rollback về",
-      "description": "Version tag sẽ rollback về. VD: v1.0.1-def5678. Dùng: kubectl rollout history deployment/my-service -n <ns>",
-      "default": "",
-      "required": true,
-      "options": []
-    },
-    {
-      "name": "revisionCount",
-      "label": "Số revision lùi về",
-      "description": "1 = revision liền trước, 2 = 2 revision trước...",
-      "default": "1",
-      "required": true,
-      "options": [
-        { "value": "1" },
-        { "value": "2" },
-        { "value": "3" }
-      ]
     }
   ],
   "triggers": [],
   "stages": [
     {
-      "refId": "1",
+      "refId": "0",
       "requisiteStageRefIds": [],
+      "type": "manualJudgment",
+      "name": "🔍 Select Target Version",
+      "failPipeline": true,
+      "propagateAuthenticationContext": true,
+      "instructions": "⚠️  EMERGENCY ROLLBACK — CHỌN VERSION\n\nService: ${parameters['deploymentName']}\nNamespace: ${parameters['environment']}\nVersion lỗi: ${parameters['currentVersion']}\n\n──────────────────────────────\n📋 BƯỚC 1 — Xem lịch sử rollout:\n\n  kubectl rollout history deployment/${parameters['deploymentName']} -n ${parameters['environment']}\n\n  Ví dụ output:\n  REVISION  CHANGE-CAUSE\n  1         louisbui/dev:v1.0.0-aaa1111\n  2         louisbui/dev:v1.0.1-bbb2222\n  3         louisbui/dev:v1.0.2-ccc3333  ← current (lỗi)\n\n📋 BƯỚC 2 — Xem chi tiết revision cụ thể:\n\n  kubectl rollout history deployment/${parameters['deploymentName']} -n ${parameters['environment']} --revision=2\n\n──────────────────────────────\n✏️  BƯỚC 3 — Gõ version muốn rollback về vào ô bên dưới\n  (VD: v1.0.1-bbb2222)\n\nSau khi nhập, click Rollback để thực hiện.",
+      "judgmentInputs": [],
+      "sendNotifications": true,
+      "notifications": [
+        {
+          "type": "slack",
+          "address": "tech-leads",
+          "when": ["manualJudgment"],
+          "message": {
+            "manualJudgment": {
+              "text": "🚨 *EMERGENCY ROLLBACK — Cần xác nhận version*\n*Service:* `${parameters['deploymentName']}` | *Env:* `${parameters['environment']}`\n*Version lỗi:* `${parameters['currentVersion']}`\nVào Spinnaker UI để chọn version rollback về."
+            }
+          }
+        }
+      ]
+    },
+    {
+      "refId": "1",
+      "requisiteStageRefIds": ["0"],
       "type": "webhook",
       "name": "Notify — Rollback Starting",
       "method": "POST",
@@ -66,19 +69,19 @@
       "customHeaders": {
         "Content-Type": "application/json"
       },
-      "payload": "{\"text\":\"🚨 *EMERGENCY ROLLBACK TRIGGERED*\\n*Service:* `${parameters['deploymentName']}`\\n*Environment:* `${parameters['environment']}`\\n*Rolling back FROM:* `${parameters['currentVersion']}` ❌\\n*Rolling back TO:* `${parameters['targetVersion']}` ✅\\n*Revisions back:* ${parameters['revisionCount']}\\n*Triggered by:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date().toString()}\\n⏳ Đang thực hiện rollback...\"}"
+      "payload": "{\"text\":\"🚨 *EMERGENCY ROLLBACK TRIGGERED*\\n*Service:* `${parameters['deploymentName']}`\\n*Environment:* `${parameters['environment']}`\\n*Rolling back FROM:* `${parameters['currentVersion']}` ❌\\n*Rolling back TO:* `${ #stage('🔍 Select Target Version')['context']['judgmentInput'] }` ✅\\n*Triggered by:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date().toString()}\\n⏳ Đang thực hiện rollback...\"}"
     },
     {
       "refId": "2",
       "requisiteStageRefIds": ["1"],
       "type": "undoRolloutManifest",
-      "name": "Undo Rollout — Rollback to Previous Version",
+      "name": "Undo Rollout",
       "account": "my-k8s-account",
       "cloudProvider": "kubernetes",
       "location": "${parameters['environment']}",
       "kind": "deployment",
       "manifestName": "deployment ${parameters['deploymentName']}",
-      "numRevisionsBack": "${parameters['revisionCount']}"
+      "numRevisionsBack": 1
     },
     {
       "refId": "3",
@@ -90,7 +93,7 @@
       "customHeaders": {
         "Content-Type": "application/json"
       },
-      "payload": "{\"text\":\"✅ *ROLLBACK COMPLETE*\\n*Service:* `${parameters['deploymentName']}`\\n*Environment:* `${parameters['environment']}`\\n*Rolled back FROM:* `${parameters['currentVersion']}` ❌\\n*Now running:* `${parameters['targetVersion']}` ✅\\n*By:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date().toString()}\\n\\nVerify:\\n  `kubectl get pods -n ${parameters['environment']} -l app=${parameters['deploymentName']}`\\n  `kubectl get deploy ${parameters['deploymentName']} -n ${parameters['environment']} -o jsonpath=\\'{.spec.template.spec.containers[0].image}\\'`\"}"
+      "payload": "{\"text\":\"✅ *ROLLBACK COMPLETE*\\n*Service:* `${parameters['deploymentName']}`\\n*Environment:* `${parameters['environment']}`\\n*Rolled back FROM:* `${parameters['currentVersion']}` ❌\\n*Now running:* `${ #stage('🔍 Select Target Version')['context']['judgmentInput'] }` ✅\\n*By:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date().toString()}\\n\\nVerify:\\n  `kubectl get pods -n ${parameters['environment']} -l app=${parameters['deploymentName']}`\\n  `kubectl get deploy ${parameters['deploymentName']} -n ${parameters['environment']} -o jsonpath='{.spec.template.spec.containers[0].image}'`\"}"
     }
   ]
 }
