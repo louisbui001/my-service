@@ -1,7 +1,7 @@
 {
   "application": "my-service",
   "name": "🚨 Emergency Rollback",
-  "description": "Rollback khẩn cấp bất kỳ namespace (dev, staging, production). Chạy thủ công khi có incident.",
+  "description": "Rollback khẩn cấp về version cụ thể. Chạy thủ công khi có incident. Điền currentVersion và targetVersion trước khi trigger.",
   "keepWaitingPipelines": false,
   "limitConcurrent": false,
   "parameterConfig": [
@@ -24,6 +24,34 @@
       "default": "my-service",
       "required": true,
       "options": []
+    },
+    {
+      "name": "currentVersion",
+      "label": "Version hiện tại (đang lỗi)",
+      "description": "Version tag đang chạy và gây lỗi. VD: v1.0.2-abc1234. Dùng: kubectl get deploy my-service -n <ns> -o jsonpath='{.spec.template.spec.containers[0].image}'",
+      "default": "",
+      "required": true,
+      "options": []
+    },
+    {
+      "name": "targetVersion",
+      "label": "Version rollback về",
+      "description": "Version tag sẽ rollback về. VD: v1.0.1-def5678. Dùng: kubectl rollout history deployment/my-service -n <ns>",
+      "default": "",
+      "required": true,
+      "options": []
+    },
+    {
+      "name": "revisionCount",
+      "label": "Số revision lùi về",
+      "description": "1 = revision liền trước, 2 = 2 revision trước...",
+      "default": "1",
+      "required": true,
+      "options": [
+        { "value": "1" },
+        { "value": "2" },
+        { "value": "3" }
+      ]
     }
   ],
   "triggers": [],
@@ -38,19 +66,19 @@
       "customHeaders": {
         "Content-Type": "application/json"
       },
-      "payload": "{\"text\":\"⚠️ *EMERGENCY ROLLBACK TRIGGERED*\\n*Service:* ${parameters['deploymentName']}\\n*Environment:* ${parameters['environment']}\\n*By:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date().toString()}\\nĐang rollback về version trước...\"}"
+      "payload": "{\"text\":\"🚨 *EMERGENCY ROLLBACK TRIGGERED*\\n*Service:* `${parameters['deploymentName']}`\\n*Environment:* `${parameters['environment']}`\\n*Rolling back FROM:* `${parameters['currentVersion']}` ❌\\n*Rolling back TO:* `${parameters['targetVersion']}` ✅\\n*Revisions back:* ${parameters['revisionCount']}\\n*Triggered by:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date().toString()}\\n⏳ Đang thực hiện rollback...\"}"
     },
     {
       "refId": "2",
       "requisiteStageRefIds": ["1"],
       "type": "undoRolloutManifest",
-      "name": "Undo Rollout",
+      "name": "Undo Rollout — Rollback to Previous Version",
       "account": "my-k8s-account",
       "cloudProvider": "kubernetes",
       "location": "${parameters['environment']}",
       "kind": "deployment",
       "manifestName": "deployment ${parameters['deploymentName']}",
-      "numRevisionsBack": 1
+      "numRevisionsBack": "${parameters['revisionCount']}"
     },
     {
       "refId": "3",
@@ -62,7 +90,7 @@
       "customHeaders": {
         "Content-Type": "application/json"
       },
-      "payload": "{\"text\":\"✅ *ROLLBACK COMPLETE*\\n*Service:* ${parameters['deploymentName']}\\n*Environment:* ${parameters['environment']}\\n*By:* ${execution['authentication']['user']}\\n*Đã rollback về version trước thành công.*\\nKiểm tra: kubectl get pods -n ${parameters['environment']}\"}"
+      "payload": "{\"text\":\"✅ *ROLLBACK COMPLETE*\\n*Service:* `${parameters['deploymentName']}`\\n*Environment:* `${parameters['environment']}`\\n*Rolled back FROM:* `${parameters['currentVersion']}` ❌\\n*Now running:* `${parameters['targetVersion']}` ✅\\n*By:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date().toString()}\\n\\nVerify:\\n  `kubectl get pods -n ${parameters['environment']} -l app=${parameters['deploymentName']}`\\n  `kubectl get deploy ${parameters['deploymentName']} -n ${parameters['environment']} -o jsonpath=\\'{.spec.template.spec.containers[0].image}\\'`\"}"
     }
   ]
 }
