@@ -1,0 +1,411 @@
+{
+  "application": "my-service",
+  "name": "CI/CD — DEV → Staging",
+  "description": "Pipeline hoàn chỉnh: auto deploy DEV → smoke test → approval gate → deploy Staging → regression test.",
+  "keepWaitingPipelines": false,
+  "limitConcurrent": true,
+  "parameterConfig": [],
+  "triggers": [
+    {
+      "type": "docker",
+      "account": "dockerhub",
+      "organization": "louisbui",
+      "repository": "louisbui/dev",
+      "tag": "^v[0-9]+\\.[0-9]+\\.[0-9]+-[a-f0-9]+$",
+      "enabled": true,
+      "payloadConstraints": {}
+    }
+  ],
+  "notifications": [],
+  "stages": [
+    {
+      "refId": "1",
+      "requisiteStageRefIds": [],
+      "type": "deployManifest",
+      "name": "Deploy to DEV",
+      "account": "my-k8s-account",
+      "cloudProvider": "kubernetes",
+      "moniker": { "app": "my-service" },
+      "skipExpressionEvaluation": false,
+      "source": "text",
+      "namespaceOverride": "dev",
+      "manifests": [
+        {
+          "apiVersion": "apps/v1",
+          "kind": "Deployment",
+          "metadata": {
+            "name": "my-service",
+            "namespace": "dev",
+            "labels": {
+              "app": "my-service",
+              "env": "dev"
+            },
+            "annotations": {
+              "deployed-version": "${trigger['tag']}",
+              "deployed-at": "${new java.util.Date().toString()}"
+            }
+          },
+          "spec": {
+            "replicas": 1,
+            "selector": {
+              "matchLabels": {
+                "app": "my-service"
+              }
+            },
+            "strategy": {
+              "type": "RollingUpdate",
+              "rollingUpdate": {
+                "maxSurge": 1,
+                "maxUnavailable": 0
+              }
+            },
+            "template": {
+              "metadata": {
+                "labels": {
+                  "app": "my-service",
+                  "version": "${trigger['tag']}"
+                }
+              },
+              "spec": {
+                "imagePullSecrets": [
+                  {
+                    "name": "registry-credentials"
+                  }
+                ],
+                "containers": [
+                  {
+                    "name": "my-service",
+                    "image": "louisbui/dev:${trigger['tag']}",
+                    "ports": [
+                      {
+                        "containerPort": 8080
+                      }
+                    ],
+                    "env": [
+                      {
+                        "name": "APP_ENV",
+                        "value": "dev"
+                      },
+                      {
+                        "name": "APP_VERSION",
+                        "value": "${trigger['tag']}"
+                      }
+                    ],
+                    "envFrom": [
+                      {
+                        "configMapRef": {
+                          "name": "my-service-config-dev"
+                        }
+                      }
+                    ],
+                    "resources": {
+                      "requests": {
+                        "cpu": "100m",
+                        "memory": "256Mi"
+                      },
+                      "limits": {
+                        "cpu": "500m",
+                        "memory": "512Mi"
+                      }
+                    },
+                    "readinessProbe": {
+                      "httpGet": {
+                        "path": "/actuator/health",
+                        "port": 8080
+                      },
+                      "initialDelaySeconds": 15,
+                      "periodSeconds": 10,
+                      "failureThreshold": 3
+                    },
+                    "livenessProbe": {
+                      "httpGet": {
+                        "path": "/actuator/health",
+                        "port": 8080
+                      },
+                      "initialDelaySeconds": 30,
+                      "periodSeconds": 20
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "apiVersion": "v1",
+          "kind": "Service",
+          "metadata": {
+            "name": "my-service",
+            "namespace": "dev",
+            "labels": {
+              "app": "my-service"
+            }
+          },
+          "spec": {
+            "selector": {
+              "app": "my-service"
+            },
+            "ports": [
+              {
+                "name": "http",
+                "port": 80,
+                "targetPort": 8080
+              }
+            ],
+            "type": "ClusterIP"
+          }
+        }
+      ]
+    },
+    {
+      "refId": "2",
+      "requisiteStageRefIds": ["1"],
+      "type": "wait",
+      "name": "Smoke Test — DEV (readinessProbe passed ✅)",
+      "waitTime": 10,
+      "comments": "deployManifest đã verify health qua readinessProbe. Pod chỉ Ready khi /actuator/health trả về 200."
+    },
+
+    {
+      "refId": "2b",
+      "requisiteStageRefIds": ["2"],
+      "type": "wait",
+      "name": "Wait — DEV Stability",
+      "waitTime": 15
+    },
+    {
+      "refId": "3",
+      "requisiteStageRefIds": ["2b"],
+      "type": "webhook",
+      "name": "Notify — DEV Deployed",
+      "method": "POST",
+      "url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+      "customHeaders": {
+        "Content-Type": "application/json"
+      },
+      "payload": "{\"text\":\"✅ *DEV deploy thành công*\\n*Service:* my-service\\n*Version:* `${trigger['tag']}`\\n*Namespace:* dev | Smoke test: ✅\\n⏸ Đang chờ Tech Lead approve để deploy Staging...\"}"
+    },
+    {
+      "refId": "4",
+      "requisiteStageRefIds": [
+        "3"
+      ],
+      "type": "manualJudgment",
+      "name": "Approval — Promote to Staging",
+      "instructions": "📋 TECH LEAD APPROVAL — PROMOTE TO STAGING\n\nService: my-service\nVersion: ${trigger['tag']}\n\nChecklist:\n☐ Smoke test DEV passed (Stage 2 xanh)\n☐ Không có blocker/critical bug\n☐ Code review đã approve trên GitHub PR\n\nTest nhanh trên DEV:\n  kubectl port-forward svc/my-service 18080:80 -n dev\n  curl http://localhost:18080/actuator/health\n\nApprove → deploy Staging ngay.\nReject → pipeline dừng, Staging giữ nguyên version cũ.",
+      "judgmentInputs": [
+        {
+          "value": "Approve — Deploy to Staging"
+        },
+        {
+          "value": "Reject — Cancel"
+        }
+      ],
+      "failPipeline": true,
+      "propagateAuthenticationContext": true,
+      "sendNotifications": true,
+      "notifications": [
+        {
+          "type": "slack",
+          "address": "tech-leads",
+          "when": [
+            "manualJudgment"
+          ],
+          "message": {
+            "manualJudgment": {
+              "text": "⏸ *APPROVAL NEEDED — my-service → Staging*\nVersion: `${trigger['tag']}`\nDEV smoke test ✅ — Approve or Reject in Spinnaker UI."
+            }
+          }
+        }
+      ]
+    },
+    {
+      "refId": "5",
+      "requisiteStageRefIds": [
+        "4"
+      ],
+      "type": "deployManifest",
+      "name": "Deploy to Staging",
+      "account": "my-k8s-account",
+      "cloudProvider": "kubernetes",
+      "moniker": { "app": "my-service" },
+      "skipExpressionEvaluation": false,
+      "source": "text",
+      "namespaceOverride": "staging",
+      "rollbackOnFailure": true,
+      "manifests": [
+        {
+          "apiVersion": "apps/v1",
+          "kind": "Deployment",
+          "metadata": {
+            "name": "my-service",
+            "namespace": "staging",
+            "labels": {
+              "app": "my-service",
+              "env": "staging"
+            },
+            "annotations": {
+              "deployed-version": "${trigger['tag']}",
+              "approved-by": "${execution['authentication']['user']}",
+              "kubernetes.io/change-cause": "Deploy ${trigger['tag']} approved by ${execution['authentication']['user']}"
+            }
+          },
+          "spec": {
+            "replicas": 2,
+            "selector": {
+              "matchLabels": {
+                "app": "my-service"
+              }
+            },
+            "strategy": {
+              "type": "RollingUpdate",
+              "rollingUpdate": {
+                "maxSurge": 1,
+                "maxUnavailable": 0
+              }
+            },
+            "template": {
+              "metadata": {
+                "labels": {
+                  "app": "my-service",
+                  "version": "${trigger['tag']}"
+                }
+              },
+              "spec": {
+                "imagePullSecrets": [
+                  {
+                    "name": "registry-credentials"
+                  }
+                ],
+                "containers": [
+                  {
+                    "name": "my-service",
+                    "image": "louisbui/dev:${trigger['tag']}",
+                    "ports": [
+                      {
+                        "containerPort": 8080
+                      }
+                    ],
+                    "env": [
+                      {
+                        "name": "APP_ENV",
+                        "value": "staging"
+                      },
+                      {
+                        "name": "APP_VERSION",
+                        "value": "${trigger['tag']}"
+                      }
+                    ],
+                    "envFrom": [
+                      {
+                        "configMapRef": {
+                          "name": "my-service-config-staging"
+                        }
+                      }
+                    ],
+                    "resources": {
+                      "requests": {
+                        "cpu": "200m",
+                        "memory": "512Mi"
+                      },
+                      "limits": {
+                        "cpu": "1000m",
+                        "memory": "1Gi"
+                      }
+                    },
+                    "readinessProbe": {
+                      "httpGet": {
+                        "path": "/actuator/health",
+                        "port": 8080
+                      },
+                      "initialDelaySeconds": 15,
+                      "periodSeconds": 10,
+                      "failureThreshold": 3
+                    },
+                    "livenessProbe": {
+                      "httpGet": {
+                        "path": "/actuator/health",
+                        "port": 8080
+                      },
+                      "initialDelaySeconds": 30,
+                      "periodSeconds": 20
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "apiVersion": "v1",
+          "kind": "Service",
+          "metadata": {
+            "name": "my-service",
+            "namespace": "staging",
+            "labels": {
+              "app": "my-service"
+            }
+          },
+          "spec": {
+            "selector": {
+              "app": "my-service"
+            },
+            "ports": [
+              {
+                "name": "http",
+                "port": 80,
+                "targetPort": 8080
+              }
+            ],
+            "type": "ClusterIP"
+          }
+        }
+      ]
+    },
+    {
+      "refId": "6",
+      "requisiteStageRefIds": [
+        "5"
+      ],
+      "type": "wait",
+      "name": "Wait — Staging Stability",
+      "waitTime": 60
+    },
+    {
+      "refId": "7",
+      "requisiteStageRefIds": ["6"],
+      "type": "wait",
+      "name": "Regression Test — Staging (readinessProbe passed ✅)",
+      "waitTime": 10,
+      "comments": "deployManifest đã verify health qua readinessProbe. Pod chỉ Ready khi /actuator/health trả về 200."
+    },
+
+    {
+      "refId": "7b",
+      "requisiteStageRefIds": ["7"],
+      "type": "wait",
+      "name": "Wait — Staging Stability",
+      "waitTime": 20
+    },
+
+    {
+      "refId": "7c",
+      "requisiteStageRefIds": ["7b"],
+      "type": "wait",
+      "name": "Wait — Staging Final Check",
+      "waitTime": 10
+    },
+    {
+      "refId": "8",
+      "requisiteStageRefIds": ["7c"],
+      "type": "webhook",
+      "name": "Notify — Staging Deployed",
+      "method": "POST",
+      "url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+      "customHeaders": {
+        "Content-Type": "application/json"
+      },
+      "payload": "{\"text\":\"🚀 *STAGING DEPLOY THÀNH CÔNG*\\n*Service:* my-service\\n*Version:* `${trigger['tag']}`\\n*Namespace:* staging\\n*Approved by:* ${execution['authentication']['user']}\\n*Regression tests:* ✅ Passed\\nService sẵn sàng cho QA/business testing.\"}"
+    }
+  ]
+}

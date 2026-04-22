@@ -1,0 +1,67 @@
+{
+  "application": "my-service",
+  "name": "🚨 Emergency Rollback",
+  "description": "Rollback khẩn cấp bất kỳ namespace. Chạy thủ công khi có incident.",
+  "keepWaitingPipelines": false,
+  "limitConcurrent": false,
+  "parameterConfig": [
+    {
+      "name": "environment",
+      "label": "Namespace cần rollback",
+      "description": "dev hoặc staging",
+      "default": "dev",
+      "required": true,
+      "options": [
+        { "value": "dev" },
+        { "value": "staging" }
+      ]
+    },
+    {
+      "name": "deploymentName",
+      "label": "Tên Deployment",
+      "description": "Tên deployment cần rollback",
+      "default": "my-service",
+      "required": true,
+      "options": []
+    }
+  ],
+  "triggers": [],
+  "stages": [
+    {
+      "refId": "1",
+      "requisiteStageRefIds": [],
+      "type": "webhook",
+      "name": "Notify — Rollback Starting",
+      "method": "POST",
+      "url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+      "customHeaders": {
+        "Content-Type": "application/json"
+      },
+      "payload": "{\"text\":\"⚠️ *EMERGENCY ROLLBACK TRIGGERED*\\n*Service:* ${parameters['deploymentName']}\\n*Environment:* ${parameters['environment']}\\n*By:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date()}\\nĐang rollback về version trước...\"}"
+    },
+    {
+      "refId": "2",
+      "requisiteStageRefIds": ["1"],
+      "type": "undoRolloutManifest",
+      "name": "Undo Rollout",
+      "account": "my-k8s-account",
+      "cloudProvider": "kubernetes",
+      "location": "${parameters['environment']}",
+      "kind": "deployment",
+      "manifestName": "deployment ${parameters['deploymentName']}",
+      "numRevisionsBack": 1
+    },
+    {
+      "refId": "3",
+      "requisiteStageRefIds": ["2"],
+      "type": "webhook",
+      "name": "Notify — Rollback Complete",
+      "method": "POST",
+      "url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+      "customHeaders": {
+        "Content-Type": "application/json"
+      },
+      "payload": "{\"text\":\"✅ *ROLLBACK COMPLETE*\\n*Service:* ${parameters['deploymentName']}\\n*Environment:* ${parameters['environment']}\\n*By:* ${execution['authentication']['user']}\\n*Đã rollback về version trước thành công.*\\nKiểm tra: kubectl get pods -n ${parameters['environment']}\"}"
+    }
+  ]
+}

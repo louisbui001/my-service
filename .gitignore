@@ -14,5 +14,8 @@ npm-debug.log*
 test-results/
 coverage/
 
+# Internal docs (chứa secrets: Slack webhook, tokens, credentials)
+docs/
+
 # OS
 .DS_Store

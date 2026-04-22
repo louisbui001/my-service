@@ -114,7 +114,6 @@ jobs:
     if: github.event_name == 'push'   # Chỉ build khi push, không build trên PR
     permissions:
       contents: read
-      packages: write
 
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
