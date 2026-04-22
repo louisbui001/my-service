@@ -53,9 +53,11 @@ app.get('/api/v1/config', (req, res) => {
     });
 });
 
-// ── Start server ──
-app.listen(PORT, () => {
-    console.log(`my-service v${APP_VERSION} [${APP_ENV}] running on port ${PORT}`);
-});
+// ── Start server (chỉ khi chạy trực tiếp, không phải khi require trong test) ──
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`my-service v${APP_VERSION} [${APP_ENV}] running on port ${PORT}`);
+    });
+}
 
 module.exports = app;

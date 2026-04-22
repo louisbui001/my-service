@@ -10,48 +10,57 @@ name: CI — Build & Push Image
 on:
   push:
     branches:
-      - uat
+      - dev
       - hotfix/**
-      - main
+      - master
   pull_request:
     branches:
-      - uat
-      - main
+      - dev
+      - master
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}   # ví dụ: myorg/my-service
+  REGISTRY: docker.io
+  IMAGE_NAME: louisbui/dev
 
 jobs:
   # ─────────────────────────────────────────────
-  # JOB 1: SAST Security Scan (Coverity)
-  # Giữ nguyên từ flow hiện tại, không thay đổi
+  # JOB 1: SAST Security Scan
+  # npm audit (dependency CVEs) + CodeQL (code analysis)
   # ─────────────────────────────────────────────
   sast-scan:
-    name: Security Scan (Coverity SAST)
+    name: Security Scan (SAST)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Run Coverity SAST Scan
-        # Thay bằng action Coverity thực của tổ chức
-        run: |
-          echo "Running Coverity SAST scan..."
-          # coverity capture --dir cov-int
-          # coverity analyze --dir cov-int
-          # coverity commit-defects --dir cov-int \
-          #   --host ${{ secrets.COVERITY_HOST }} \
-          #   --stream my-service-uat \
-          #   --auth-key-file coverity-auth.key
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
 
-      - name: Check SAST results
-        run: |
-          echo "Checking for HIGH/CRITICAL findings..."
-          # Nếu có HIGH → exit 1 → notify Tech Lead, pipeline stop
-          # Nếu không có → continue
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dependency vulnerability scan (npm audit)
+        run: npm audit --audit-level=high
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+          queries: security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript"
 
       - name: Notify Tech Lead on SAST failure
         if: failure()
@@ -75,30 +84,28 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup language runtime
-        # Ví dụ cho Java/Maven — thay theo tech stack thực
-        uses: actions/setup-java@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run unit tests
-        run: |
-          # mvn test (Java)
-          # npm test (Node.js)
-          # pytest (Python)
-          echo "Running unit tests..."
+        run: npm test
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: target/surefire-reports/   # thay theo tech stack
+          path: test-results/
 
   # ─────────────────────────────────────────────
   # JOB 3: Build & Push Docker Image
-  # Chỉ chạy khi merge vào uat/main (không chạy trên PR)
+  # Chỉ chạy khi merge vào dev/master (không chạy trên PR)
   # ─────────────────────────────────────────────
   build-push:
     name: Build & Push Docker Image
@@ -133,12 +140,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
+      - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract Docker metadata
         id: meta

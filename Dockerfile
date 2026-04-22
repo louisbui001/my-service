@@ -12,6 +12,14 @@ RUN npm ci --only=production
 # Dùng image nhỏ hơn cho production (không có npm, không có dev tools)
 FROM node:20-alpine AS runtime
 
+# Build-time metadata args
+ARG APP_VERSION=unknown
+ARG BUILD_DATE=unknown
+ARG GIT_COMMIT=unknown
+LABEL app.version="${APP_VERSION}" \
+      build.date="${BUILD_DATE}" \
+      git.commit="${GIT_COMMIT}"
+
 # Tạo user non-root để chạy app (security best practice)
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
