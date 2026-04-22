@@ -44,7 +44,8 @@
             },
             "annotations": {
               "deployed-version": "${trigger['tag']}",
-              "deployed-at": "${new java.util.Date().toString()}"
+              "deployed-at": "${new java.util.Date().toString()}",
+              "kubernetes.io/change-cause": "Deploy ${trigger['tag']} to dev"
             }
           },
           "spec": {
