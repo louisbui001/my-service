@@ -53,7 +53,7 @@
       "name": "🎯 Select Target Version",
       "failPipeline": true,
       "propagateAuthenticationContext": true,
-      "instructions": "🚨 EMERGENCY ROLLBACK\n\nService: ${parameters['deploymentName']}\nNamespace: ${parameters['environment']}\n\n──────────────────────────────\n📦 IMAGE ĐANG CHẠY (tự động đọc từ K8s):\n\n  ${ #stage('🔎 Get Current Running Image')['outputs']['artifacts'].?[type == 'docker/image'][0]['reference'] }\n\n──────────────────────────────\n📋 XEM LỊCH SỬ REVISION (annotation deployed-version):\n\n  Spinnaker UI → Infrastructure → Clusters → chọn deployment → xem Annotations\n\n  Hoặc mở terminal:\n  kubectl get replicasets -n ${parameters['environment']} \\\n    -l app=${parameters['deploymentName']} \\\n    --sort-by=.metadata.creationTimestamp \\\n    -o custom-columns='NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image,CREATED:.metadata.creationTimestamp'\n\n──────────────────────────────\n✏️  NHẬP VERSION MUỐN ROLLBACK VỀ bên dưới:\n  (VD: louisbui/dev:v1.0.1-bbb2222  hoặc chỉ tag: v1.0.1-bbb2222)\n\nClick Rollback để xác nhận.",
+      "instructions": "🚨 EMERGENCY ROLLBACK — CHỌN VERSION\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️  IMAGE ĐANG CHẠY (tự động đọc từ K8s):\n\n   ${ #stage('🔎 Get Current Running Image')['outputs']['artifacts'].?[type == 'docker/image'][0]['reference'] }\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📋 XEM CÁC VERSION ĐÃ DEPLOY (ReplicaSets):\n\n   kubectl get replicasets \\\n     -n ${parameters['environment']} \\\n     -l app=${parameters['deploymentName']} \\\n     --sort-by=.metadata.creationTimestamp \\\n     -o custom-columns=\\\n'REVISION:.metadata.annotations.deployment\\.kubernetes\\.io/revision,IMAGE:.spec.template.spec.containers[0].image,CREATED:.metadata.creationTimestamp'\n\n   Kết quả ví dụ:\n   REVISION  IMAGE                          CREATED\n   5         louisbui/dev:v1.0.6-abc1235    2h ago   ← đang chạy\n   4         louisbui/dev:v1.0.5-def1234    1d ago   ← muốn về đây\n   3         louisbui/dev:v1.0.4-ghi5678    3d ago\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✏️  NHẬP FULL IMAGE TAG MUỐN ROLLBACK VỀ:\n\n   Ví dụ: louisbui/dev:v1.0.5-def1234\n\n   ⚠️  Nhập ĐÚNG tag — pipeline sẽ patch image trực tiếp\n       lên deployment/${parameters['deploymentName']}\n       namespace: ${parameters['environment']}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ Click [Continue] sau khi nhập tag bên dưới\n❌ Click [Stop] để huỷ — không có gì thay đổi",
       "judgmentInputs": [],
       "sendNotifications": true,
       "notifications": [
@@ -90,14 +90,16 @@
       "requisiteStageRefIds": [
         "2"
       ],
-      "type": "undoRolloutManifest",
-      "name": "Undo Rollout",
+      "type": "patchManifest",
+      "name": "🔄 Patch Image — Rollback to Selected Version",
       "account": "my-k8s-account",
       "cloudProvider": "kubernetes",
       "location": "${parameters['environment']}",
-      "kind": "deployment",
       "manifestName": "deployment ${parameters['deploymentName']}",
-      "numRevisionsBack": 1
+      "patchBody": "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"${parameters['deploymentName']}\",\"image\":\"${ #stage('🎯 Select Target Version')['context']['judgmentInput'] }\"}]}}}}",
+      "options": {
+        "mergeStrategy": "strategic"
+      }
     },
     {
       "refId": "4",
