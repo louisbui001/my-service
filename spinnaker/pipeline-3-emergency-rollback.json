@@ -1,7 +1,7 @@
 {
   "application": "my-service",
   "name": "🚨 Emergency Rollback",
-  "description": "Rollback khẩn cấp. Spinnaker tự đọc version đang chạy — không cần CLI. Operator chọn version rollback ngay trong UI.",
+  "description": "Rollback khẩn cấp bất kỳ namespace (dev, staging, production). Chạy thủ công khi có incident.",
   "keepWaitingPipelines": false,
   "limitConcurrent": false,
   "parameterConfig": [
@@ -12,15 +12,9 @@
       "default": "dev",
       "required": true,
       "options": [
-        {
-          "value": "dev"
-        },
-        {
-          "value": "staging"
-        },
-        {
-          "value": "production"
-        }
+        { "value": "dev" },
+        { "value": "staging" },
+        { "value": "production" }
       ]
     },
     {
@@ -35,47 +29,8 @@
   "triggers": [],
   "stages": [
     {
-      "refId": "0",
-      "requisiteStageRefIds": [],
-      "type": "findArtifactsFromResource",
-      "name": "🔎 Get Current Running Image",
-      "account": "my-k8s-account",
-      "cloudProvider": "kubernetes",
-      "location": "${parameters['environment']}",
-      "manifestName": "deployment ${parameters['deploymentName']}"
-    },
-    {
       "refId": "1",
-      "requisiteStageRefIds": [
-        "0"
-      ],
-      "type": "manualJudgment",
-      "name": "🎯 Select Target Version",
-      "failPipeline": true,
-      "propagateAuthenticationContext": true,
-      "instructions": "🚨 EMERGENCY ROLLBACK — CHỌN VERSION\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️  IMAGE ĐANG CHẠY (tự động đọc từ K8s):\n\n   ${ #stage('🔎 Get Current Running Image')['outputs']['artifacts'].?[type == 'docker/image'][0]['reference'] }\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📋 XEM CÁC VERSION ĐÃ DEPLOY (ReplicaSets):\n\n   kubectl get replicasets \\\n     -n ${parameters['environment']} \\\n     -l app=${parameters['deploymentName']} \\\n     --sort-by=.metadata.creationTimestamp \\\n     -o custom-columns=\\\n'REVISION:.metadata.annotations.deployment\\.kubernetes\\.io/revision,IMAGE:.spec.template.spec.containers[0].image,CREATED:.metadata.creationTimestamp'\n\n   Kết quả ví dụ:\n   REVISION  IMAGE                          CREATED\n   5         louisbui/dev:v1.0.6-abc1235    2h ago   ← đang chạy\n   4         louisbui/dev:v1.0.5-def1234    1d ago   ← muốn về đây\n   3         louisbui/dev:v1.0.4-ghi5678    3d ago\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✏️  NHẬP FULL IMAGE TAG MUỐN ROLLBACK VỀ:\n\n   Ví dụ: louisbui/dev:v1.0.5-def1234\n\n   ⚠️  Nhập ĐÚNG tag — pipeline sẽ patch image trực tiếp\n       lên deployment/${parameters['deploymentName']}\n       namespace: ${parameters['environment']}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ Click [Continue] sau khi nhập tag bên dưới\n❌ Click [Stop] để huỷ — không có gì thay đổi",
-      "judgmentInputs": [],
-      "sendNotifications": true,
-      "notifications": [
-        {
-          "type": "slack",
-          "address": "tech-leads",
-          "when": [
-            "manualJudgment"
-          ],
-          "message": {
-            "manualJudgment": {
-              "text": "🚨 *EMERGENCY ROLLBACK — Cần xác nhận*\n*Service:* `${parameters['deploymentName']}` | *Env:* `${parameters['environment']}`\n*Đang chạy:* `${ #stage('🔎 Get Current Running Image')['outputs']['artifacts'].?[type == 'docker/image'][0]['reference'] }`\nVào Spinnaker UI để chọn version rollback về."
-            }
-          }
-        }
-      ]
-    },
-    {
-      "refId": "2",
-      "requisiteStageRefIds": [
-        "1"
-      ],
+      "requisiteStageRefIds": [],
       "type": "webhook",
       "name": "Notify — Rollback Starting",
       "method": "POST",
@@ -83,43 +38,23 @@
       "customHeaders": {
         "Content-Type": "application/json"
       },
-      "payload": "{\"text\":\"🚨 *EMERGENCY ROLLBACK TRIGGERED*\\n*Service:* `${parameters['deploymentName']}`\\n*Environment:* `${parameters['environment']}`\\n*Rolling back FROM:* `${ #stage('🔎 Get Current Running Image')['outputs']['artifacts'].?[type == 'docker/image'][0]['reference'] }` ❌\\n*Rolling back TO:* `${ #stage('🎯 Select Target Version')['context']['judgmentInput'] }` ✅\\n*By:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date().toString()}\\n⏳ Đang thực hiện rollback...\"}"
+      "payload": "{\"text\":\"⚠️ *EMERGENCY ROLLBACK TRIGGERED*\\n*Service:* ${parameters['deploymentName']}\\n*Environment:* ${parameters['environment']}\\n*By:* ${execution['authentication']['user']}\\n*Time:* ${new java.util.Date().toString()}\\nĐang rollback về version trước...\"}"
     },
     {
-      "refId": "3",
-      "requisiteStageRefIds": [
-        "2"
-      ],
-      "type": "patchManifest",
-      "name": "🔄 Patch Image — Rollback to Selected Version",
+      "refId": "2",
+      "requisiteStageRefIds": ["1"],
+      "type": "undoRolloutManifest",
+      "name": "Undo Rollout",
       "account": "my-k8s-account",
       "cloudProvider": "kubernetes",
       "location": "${parameters['environment']}",
+      "kind": "deployment",
       "manifestName": "deployment ${parameters['deploymentName']}",
-      "patchBody": {
-        "spec": {
-          "template": {
-            "spec": {
-              "containers": [
-                {
-                  "name": "${parameters['deploymentName']}",
-                  "image": "${ #stage('🎯 Select Target Version')['context']['judgmentInput'] }"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "options": {
-        "mergeStrategy": "strategic"
-      },
-      "source": "text"
+      "numRevisionsBack": 1
     },
     {
-      "refId": "4",
-      "requisiteStageRefIds": [
-        "3"
-      ],
+      "refId": "3",
+      "requisiteStageRefIds": ["2"],
       "type": "webhook",
       "name": "Notify — Rollback Complete",
       "method": "POST",
@@ -127,7 +62,7 @@
       "customHeaders": {
         "Content-Type": "application/json"
       },
-      "payload": "{\"text\":\"✅ *ROLLBACK COMPLETE*\\n*Service:* `${parameters['deploymentName']}`\\n*Environment:* `${parameters['environment']}`\\n*Rolled back FROM:* `${ #stage('🔎 Get Current Running Image')['outputs']['artifacts'].?[type == 'docker/image'][0]['reference'] }` ❌\\n*Now running:* `${ #stage('🎯 Select Target Version')['context']['judgmentInput'] }` ✅\\n*By:* ${execution['authentication']['user']}\\n\\nVerify image:\\n  `kubectl get deploy ${parameters['deploymentName']} -n ${parameters['environment']} -o jsonpath=\\'{.spec.template.spec.containers[0].image}\\'`\"}"
+      "payload": "{\"text\":\"✅ *ROLLBACK COMPLETE*\\n*Service:* ${parameters['deploymentName']}\\n*Environment:* ${parameters['environment']}\\n*By:* ${execution['authentication']['user']}\\n*Đã rollback về version trước thành công.*\\nKiểm tra: kubectl get pods -n ${parameters['environment']}\"}"
     }
   ]
 }
