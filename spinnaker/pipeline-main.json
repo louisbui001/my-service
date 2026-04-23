@@ -200,13 +200,13 @@
       ],
       "type": "manualJudgment",
       "name": "Approval — Promote to Staging",
-      "instructions": "📋 TECH LEAD APPROVAL — PROMOTE TO STAGING\n\nService: my-service\nVersion: ${trigger['tag']}\n\nChecklist:\n☐ Smoke test DEV passed (Stage 2 xanh)\n☐ Không có blocker/critical bug\n☐ Code review đã approve trên GitHub PR\n\nTest nhanh trên DEV:\n  kubectl port-forward svc/my-service 18080:80 -n dev\n  curl http://localhost:18080/actuator/health\n\nApprove → deploy Staging ngay.\nReject → pipeline dừng, Staging giữ nguyên version cũ.",
+      "instructions": "📋 TECH LEAD APPROVAL — PROMOTE TO STAGING\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📦 ARTIFACT\n   Image: ${trigger['tag']}\n   Built by: GitHub Actions CI\n   SAST: ✅ CodeQL + npm audit passed\n   Tests: ✅ 16/16 unit tests passed\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🌍 DEV ENVIRONMENT STATUS\n   Namespace: dev\n   Replicas: 2/2 running\n\n   Verify nhanh:\n     kubectl get pods -n dev -l app=my-service\n     kubectl logs -l app=my-service -n dev --tail=20\n     curl http://my-service.dev.svc.cluster.local/actuator/health\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ CHECKLIST TRƯỚC KHI APPROVE\n   ☐ Stage 2 (Smoke Test DEV) đã xanh\n   ☐ Không có lỗi trong logs DEV\n   ☐ Không có blocker/critical bug\n   ☐ Code review đã được approve trên GitHub PR\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️  Approve → deploy ngay lên Staging\n    Reject  → pipeline dừng, Staging giữ nguyên version cũ",
       "judgmentInputs": [
         {
           "value": "Approve — Deploy to Staging"
         },
         {
-          "value": "Reject — Cancel"
+          "value": "Reject — Cancel Pipeline"
         }
       ],
       "failPipeline": true,
@@ -215,13 +215,13 @@
       "notifications": [
         {
           "type": "slack",
-          "address": "tech-leads",
+          "address": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
           "when": [
             "manualJudgment"
           ],
           "message": {
             "manualJudgment": {
-              "text": "⏸ *APPROVAL NEEDED — my-service → Staging*\nVersion: `${trigger['tag']}`\nDEV smoke test ✅ — Approve or Reject in Spinnaker UI."
+              "text": "⏸ *APPROVAL NEEDED — my-service → Staging*\nImage: `${trigger['tag']}`\nDEV: ✅ Smoke test passed | SAST: ✅ | Tests: ✅\nApprove hoặc Reject trong Spinnaker UI."
             }
           }
         }
@@ -430,13 +430,13 @@
       ],
       "type": "manualJudgment",
       "name": "Approval — Promote to Production",
-      "instructions": "📋 TECH LEAD APPROVAL — PROMOTE TO PRODUCTION\n\nService: my-service\nVersion: ${trigger['tag']}\n\nChecklist:\n☐ Staging regression tests passed (Stage 7 xanh)\n☐ QA sign-off trên Staging\n☐ Không có blocker/critical bug\n☐ Change request đã được tạo\n\n⚠️  Pipeline sẽ deploy Canary (~25% traffic) trước, sau đó chờ xác nhận lần nữa trước khi full production.\n\nApprove → bắt đầu Canary.\nReject → pipeline dừng, production giữ nguyên.",
+      "instructions": "📋 TECH LEAD / MANAGER APPROVAL — PROMOTE TO PRODUCTION\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📦 ARTIFACT\n   Image: ${trigger['tag']}\n   Đã test qua: DEV ✅ → Staging ✅\n   Cùng 1 image được dùng xuyên suốt pipeline\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🌍 STAGING ENVIRONMENT STATUS\n   Namespace: staging\n   Replicas: 2/2 running\n\n   Verify nhanh:\n     kubectl get pods -n staging -l app=my-service\n     kubectl logs -l app=my-service -n staging --tail=20\n     curl http://my-service.staging.svc.cluster.local/actuator/health\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🏭 PRODUCTION HIỆN TẠI\n   Namespace: production\n   Xem version đang chạy:\n     kubectl get pods -n production -l app=my-service\n     kubectl get deployment my-service -n production \\\n       -o jsonpath='{.spec.template.spec.containers[0].image}'\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ CHECKLIST TRƯỚC KHI APPROVE\n   ☐ Stage 7 (Regression Test Staging) đã xanh\n   ☐ QA sign-off trên Staging\n   ☐ Không có blocker/critical bug\n   ☐ Không phải giờ cao điểm (deploy lúc thấp điểm)\n   ☐ On-call engineer đã được thông báo\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🐦 SAU KHI APPROVE — 2 BƯỚC AN TOÀN:\n   1. Deploy CANARY (~25% traffic) — chạy 2 phút\n   2. Hỏi lại: Promote full hay Rollback?\n   → Còn 1 checkpoint nữa trước khi 100% traffic chuyển\n\n⚠️  Approve → bắt đầu Canary deploy\n    Reject  → pipeline dừng, production giữ nguyên",
       "judgmentInputs": [
         {
           "value": "Approve — Start Canary Deploy"
         },
         {
-          "value": "Reject — Cancel"
+          "value": "Reject — Cancel Pipeline"
         }
       ],
       "failPipeline": true,
@@ -445,13 +445,13 @@
       "notifications": [
         {
           "type": "slack",
-          "address": "tech-leads",
+          "address": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
           "when": [
             "manualJudgment"
           ],
           "message": {
             "manualJudgment": {
-              "text": "⏸ *APPROVAL NEEDED — my-service → PRODUCTION*\nVersion: `${trigger['tag']}`\nStaging regression ✅ — Approve to start Canary in Spinnaker UI."
+              "text": "⏸ *APPROVAL NEEDED — my-service → PRODUCTION*\nImage: `${trigger['tag']}`\nStaging: ✅ Regression passed\n⚠️ Sẽ deploy Canary (~25%) trước — còn 1 checkpoint nữa\nApprove hoặc Reject trong Spinnaker UI."
             }
           }
         }
@@ -621,7 +621,7 @@
       ],
       "type": "manualJudgment",
       "name": "Canary Analysis — Promote or Rollback",
-      "instructions": "🔍 CANARY ANALYSIS\n\nService: my-service\nCanary Version: ${trigger['tag']}\nCanary đã chạy 2 phút trên Production (~25% traffic)\n\nKiểm tra:\n  kubectl logs -l slot=canary -n production --tail=50\n  kubectl top pod -l slot=canary -n production\n  kubectl describe pod -l slot=canary -n production\n\n✅ PROMOTE nếu:\n  - Không có error/exception bất thường\n  - Response time bình thường\n  - readinessProbe pass\n\n❌ ROLLBACK nếu:\n  - Có lỗi 5xx tăng đột biến\n  - Crash loop / OOMKilled\n  - Metrics bất thường",
+      "instructions": "🔍 CANARY ANALYSIS — PROMOTE HAY ROLLBACK?\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🐦 CANARY STATUS\n   Image: ${trigger['tag']}\n   Namespace: production\n   Deployment: my-service-canary\n   Đã chạy 2 phút với ~25% production traffic\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🏭 PRODUCTION STABLE (75% traffic — không bị ảnh hưởng)\n   Deployment: my-service\n   Namespace: production\n   Replicas: 3/3 running\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔎 KIỂM TRA CANARY\n   kubectl get pods -n production -l slot=canary\n   kubectl logs -l slot=canary -n production --tail=50\n   kubectl top pod -l slot=canary -n production\n   kubectl describe pod -l slot=canary -n production\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ PROMOTE nếu:\n   ☐ Không có error/exception bất thường trong logs\n   ☐ Response time bình thường (so với stable)\n   ☐ readinessProbe pass liên tục\n   ☐ Không có 5xx tăng đột biến\n\n❌ ROLLBACK nếu:\n   ☐ Có lỗi 5xx tăng đột biến\n   ☐ Pod CrashLoopBackOff / OOMKilled\n   ☐ Response time tăng bất thường\n   ☐ Bất kỳ dấu hiệu bất ổn nào\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nPromote  → Blue-Green full deploy 3 replicas, xóa canary\nRollback → Xóa canary ngay, production stable giữ nguyên 100%",
       "judgmentInputs": [
         {
           "value": "Promote — Blue/Green Full Deploy"
