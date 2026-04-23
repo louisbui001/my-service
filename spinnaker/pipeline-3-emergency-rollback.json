@@ -96,10 +96,24 @@
       "cloudProvider": "kubernetes",
       "location": "${parameters['environment']}",
       "manifestName": "deployment ${parameters['deploymentName']}",
-      "patchBody": "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"${parameters['deploymentName']}\",\"image\":\"${ #stage('🎯 Select Target Version')['context']['judgmentInput'] }\"}]}}}}",
+      "patchBody": {
+        "spec": {
+          "template": {
+            "spec": {
+              "containers": [
+                {
+                  "name": "${parameters['deploymentName']}",
+                  "image": "${ #stage('🎯 Select Target Version')['context']['judgmentInput'] }"
+                }
+              ]
+            }
+          }
+        }
+      },
       "options": {
         "mergeStrategy": "strategic"
-      }
+      },
+      "source": "text"
     },
     {
       "refId": "4",
