@@ -1,9 +1,5 @@
 # .github/workflows/ci.yml
 # CI Pipeline: Build → Scan → Push Image
-# =========================================
-# Vai trò: Build artifact duy nhất, không deploy
-# Output: Docker image với immutable tag
-# =========================================
 
 name: CI — Build & Push Image
 
@@ -25,7 +21,6 @@ env:
 jobs:
   # ─────────────────────────────────────────────
   # JOB 1: SAST Security Scan
-  # npm audit (dependency CVEs) + CodeQL (code analysis)
   # ─────────────────────────────────────────────
   sast-scan:
     name: Security Scan (SAST)
@@ -105,7 +100,6 @@ jobs:
 
   # ─────────────────────────────────────────────
   # JOB 3: Build & Push Docker Image
-  # Chỉ chạy khi merge vào dev/master (không chạy trên PR)
   # ─────────────────────────────────────────────
   build-push:
     name: Build & Push Docker Image
@@ -166,7 +160,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Build arguments nếu cần
           build-args: |
             APP_VERSION=${{ steps.version.outputs.version }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
