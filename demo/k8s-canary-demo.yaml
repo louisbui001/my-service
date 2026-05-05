@@ -1,0 +1,158 @@
+# ═══════════════════════════════════════════════════════════
+#  CANARY DEMO — Kubernetes Manifests
+#  Mô phỏng: Stable v1.0.1 (3 pods) + Canary v1.0.2 (1 pod)
+#  Traffic split: ~75% → stable, ~25% → canary
+# ═══════════════════════════════════════════════════════════
+
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: canary-demo
+  labels:
+    purpose: demo
+
+---
+# ─── STABLE Deployment — v1.0.1 (3 replicas) ──────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-service-stable
+  namespace: canary-demo
+  labels:
+    app: my-service
+    track: stable
+    version: v1.0.1
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    change-cause: "Stable release v1.0.1"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-service
+      track: stable
+  template:
+    metadata:
+      labels:
+        app: my-service   # ← Service selector dùng label này
+        track: stable
+        version: v1.0.1
+    spec:
+      containers:
+        - name: my-service
+          image: louisbui/dev:latest    # ← thay bằng image thực của bạn
+          ports:
+            - containerPort: 8080
+          env:
+            - name: APP_VERSION
+              value: "v1.0.1-stable"
+            - name: APP_ENV
+              value: "production"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+
+---
+# ─── CANARY Deployment — v1.0.2 (1 replica) ──────────────
+# 1/(1+3) = 25% traffic về canary khi cùng selector app=my-service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-service-canary
+  namespace: canary-demo
+  labels:
+    app: my-service
+    track: canary
+    version: v1.0.2-canary
+  annotations:
+    change-cause: "Canary release v1.0.2 — monitoring 25% traffic"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-service
+      track: canary
+  template:
+    metadata:
+      labels:
+        app: my-service   # ← cùng label → Service load balance cả stable + canary
+        track: canary
+        version: v1.0.2-canary
+    spec:
+      containers:
+        - name: my-service
+          image: louisbui/dev:v1.0.2-canary   # ← image có bug 40% error rate
+          ports:
+            - containerPort: 8080
+          env:
+            - name: APP_VERSION
+              value: "v1.0.2-canary"
+            - name: APP_ENV
+              value: "production"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+
+---
+# ─── Service — Load balance tất cả pods có label app=my-service ──
+# Kết quả: ~75% requests → stable pods, ~25% → canary pod
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  namespace: canary-demo
+  labels:
+    app: my-service
+spec:
+  selector:
+    app: my-service   # ← match CẢ stable và canary pods
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
+
+---
+# ─── NodePort (để test từ ngoài cluster) ─────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service-external
+  namespace: canary-demo
+spec:
+  selector:
+    app: my-service
+  ports:
+    - port: 80
+      targetPort: 8080
+      nodePort: 30080
+  type: NodePort
